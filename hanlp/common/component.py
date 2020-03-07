@@ -28,6 +28,8 @@ from hanlp.utils.tf_util import size_of_dataset, summary_of_model, get_callback_
 from hanlp.utils.time_util import Timer, now_datetime
 from hanlp.utils.util import merge_dict
 
+import time
+
 
 class Component(ABC):
 
@@ -447,30 +449,48 @@ class KerasComponent(Component, ABC):
         if not batch_size:
             batch_size = self.config.batch_size
 
-        dataset = self.transform.inputs_to_dataset(data, batch_size=batch_size, gold=kwargs.get('gold', False))
-
+        dataset = self.transform.inputs_to_dataset(data, batch_size=batch_size,
+                                                   gold=kwargs.get('gold', False))
+        ta = time.time()
         results = []
+        gen = []  # 用于接收GPU计算后的结果（未进行Y_to_outputs的转换）
         num_samples = 0
         data_is_list = isinstance(data, list)
         for idx, batch in enumerate(dataset):
-            samples_in_batch = tf.shape(batch[-1] if isinstance(batch[-1], tf.Tensor) else batch[-1][0])[0]
+            samples_in_batch = tf.shape(batch[-1] if isinstance(batch[-1], tf.Tensor) else batch[-1][0])[0]  #
             if data_is_list:
-                inputs = data[num_samples:num_samples + samples_in_batch]
+                inputs = data[num_samples:num_samples + samples_in_batch]  # 注意，在这里做了数据拆分，拆成一个个batch，按batch_size拆分
             else:
                 inputs = None  # if data is a generator, it's usually one-time, not able to transform into a list
-            for output in self.predict_batch(batch, inputs=inputs, **kwargs):
-                results.append(output)
+
+            char_num = sum([len(i) for i in inputs])
+            t00 = time.time()
+            results += self.predict_batch(batch, inputs=inputs, **kwargs)
+            t11 = time.time()
+            time_pure_cal = round(t11 - t00, 3)
+            print('time_pure_cal:', time_pure_cal, 'char processing:%s per second' % (round(char_num / time_pure_cal)), '\n')
+            # for output in gen:
+            #     results.append(output)
             num_samples += samples_in_batch
+        tb = time.time()
+        time_calculating = round(tb - ta, 3)
+        print('time_calculating=%s' % (time_calculating))
+
+        outs = list(self.transform.Y_to_outputs(Y, X=X, inputs=inputs, **kwargs))
+        t222 = time.time()
+        # print("后处理时间：", round(t222 - t111, 3))
+        for output in outs:
+            yield output
 
         if flat:
             return results[0]
         return results
 
     def predict_batch(self, batch, inputs=None, **kwargs):
+        # batch是从token转为number的数据，而inputs是原始数据。计算的时候使用`batch`这种已经转化为计算机可理解的数据进行运算，
+        # 然后再使用Y_to_outputs()函数做些处理，将tag标记到对应的原始数据input上
         X = batch[0]
-        Y = self.model.predict_on_batch(X)
-        for output in self.transform.Y_to_outputs(Y, X=X, inputs=inputs, **kwargs):
-            yield output
+        return self.model.predict_on_batch(X)
 
     @property
     def sample_data(self):
@@ -512,7 +532,7 @@ class KerasComponent(Component, ABC):
             logger.info(f'You can serve it through \n'
                         f'tensorflow_model_server --model_name={os.path.splitext(os.path.basename(self.meta["load_path"]))[0]} '
                         f'--model_base_path={export_dir} --rest_api_port=8888')
-        return export_dir
+            return export_dir
 
     def serve(self, export_dir=None, grpc_port=8500, rest_api_port=0, overwrite=False, dry_run=False):
         export_dir = self.export_model_for_serving(export_dir, show_hint=False, overwrite=overwrite)
@@ -521,8 +541,8 @@ class KerasComponent(Component, ABC):
         logger.info('The inputs of exported model is shown below.')
         os.system(f'saved_model_cli show --all --dir {export_dir}/1')
         cmd = f'nohup tensorflow_model_server --model_name={os.path.splitext(os.path.basename(self.meta["load_path"]))[0]} ' \
-              f'--model_base_path={export_dir} --port={grpc_port} --rest_api_port={rest_api_port} ' \
-              f'>serve.log 2>&1 &'
+            f'--model_base_path={export_dir} --port={grpc_port} --rest_api_port={rest_api_port} ' \
+            f'>serve.log 2>&1 &'
         logger.info(f'Running ...\n{cmd}')
         if not dry_run:
             os.system(cmd)

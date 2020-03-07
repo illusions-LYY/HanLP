@@ -11,6 +11,8 @@ from hanlp.common.vocab import Vocab
 from hanlp.components.taggers.transformers.utils import convert_examples_to_features, config_is
 from hanlp.transform.tsv import TsvTaggingFormat
 
+import time
+from hanlp.utils.parallel_util import *
 
 class TransformerTransform(TsvTaggingFormat, Transform):
     def __init__(self,
@@ -123,7 +125,14 @@ class TransformerTransform(TsvTaggingFormat, Transform):
         mask = tf.reduce_all(tf.not_equal(tf.expand_dims(input_ids, axis=-1), self.special_token_ids), axis=-1)
         Y = tf.argmax(Y, axis=-1)
         Y = Y[mask]
-        tags = [self.tag_vocab.idx_to_token[tid] for tid in Y]
+
+        taa = time.time()
+        # tags = [self.tag_vocab.idx_to_token[tid] for tid in Y]
+        #TODO: 我自己加的部分：
+        tags = do_parallel(parallel_task, Y)
+        tbb = time.time()
+
+        print("idx_to_token耗时%s"%(round(tbb - taa,4)))
         offset = 0
         for words in inputs:
             yield tags[offset:offset + len(words)]

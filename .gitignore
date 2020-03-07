@@ -285,3 +285,6 @@ fabric.properties
 .idea
 *.iml
 data
+
+# for MacOS
+.DS_Store
