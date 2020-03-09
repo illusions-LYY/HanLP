@@ -117,22 +117,25 @@ class TransformerTransform(TsvTaggingFormat, Transform):
     def input_is_single_sample(self, input: Union[List[str], List[List[str]]]) -> bool:
         return isinstance(input[0], str)
 
-    def Y_to_outputs(self, Y: Union[tf.Tensor, Tuple[tf.Tensor]], gold=False, X=None, inputs=None,
+    def Y_to_outputs(self, Y: Union[tf.Tensor, Tuple[tf.Tensor]], gold=False, X=None, inputs=None,is_parallel=None,
                      **kwargs) -> Iterable:
         assert X is not None, 'Need the X to know actual length of Y'
-        input_ids, input_mask, segment_ids = X
+        y_all = []
+        for x,y in zip(X,Y):
+            input_ids, input_mask, segment_ids = x
 
-        mask = tf.reduce_all(tf.not_equal(tf.expand_dims(input_ids, axis=-1), self.special_token_ids), axis=-1)
-        Y = tf.argmax(Y, axis=-1)
-        Y = Y[mask]
+            mask = tf.reduce_all(tf.not_equal(tf.expand_dims(input_ids, axis=-1), self.special_token_ids), axis=-1)
+            y = tf.argmax(y, axis=-1)
+            y_all += y[mask].numpy().tolist()
 
-        taa = time.time()
-        # tags = [self.tag_vocab.idx_to_token[tid] for tid in Y]
-        #TODO: 我自己加的部分：
-        tags = do_parallel(parallel_task, Y)
-        tbb = time.time()
+        if is_parallel:
+            taa = time.time()
+            tags = do_parallel(parallel_task, y_all)
+            tbb = time.time()
+            print("idx_to_token耗时%s" % (round(tbb - taa, 4)))
+        else:
+            tags = [self.tag_vocab.idx_to_token[tid] for tid in y_all]
 
-        print("idx_to_token耗时%s"%(round(tbb - taa,4)))
         offset = 0
         for words in inputs:
             yield tags[offset:offset + len(words)]

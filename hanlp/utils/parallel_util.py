@@ -2,11 +2,11 @@
 # Author: illusion_Shen
 # Time  : 2020-03-07 17:14
 import multiprocessing as mps
-import numpy as np
+from numpy import linspace
 
 
 def parallel_task(data):
-    data = data.to_list()
+    # data = data.to_list()   # 注意data到底是list还是numpy.array还是tf.Tensor？
     convert_arr = ['<pad>', 'O', 'S-NS', 'B-NS', 'E-NS', 'B-NT', 'M-NT', 'E-NT', 'M-NS', 'B-NR', 'M-NR', 'E-NR', 'S-NR', 'S-NT']
     res = [convert_arr[tid] for tid in data]
     return res
@@ -19,7 +19,7 @@ def split_data(data):
     return: 被分成m块的data数据，形式为list
     """
     cores = int(mps.cpu_count() * 0.9)   # 决定使用多少cpu做计算——这里显然应该优化，就试试
-    split_num = np.linspace(0, len(data), cores + 1, dtype=int)
+    split_num = linspace(0, len(data), cores + 1, dtype=int)
     data_seg = [data[split_num[j]:split_num[j + 1]] for j in range(len(split_num) - 1)]
     return data_seg, cores
 

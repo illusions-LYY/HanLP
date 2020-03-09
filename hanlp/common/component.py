@@ -452,45 +452,47 @@ class KerasComponent(Component, ABC):
         dataset = self.transform.inputs_to_dataset(data, batch_size=batch_size,
                                                    gold=kwargs.get('gold', False))
         ta = time.time()
-        results = []
-        gen = []  # 用于接收GPU计算后的结果（未进行Y_to_outputs的转换）
+        results = []  # 用于接收GPU计算后的结果（未进行Y_to_outputs的转换）
+        input_batches, X = [], []
         num_samples = 0
         data_is_list = isinstance(data, list)
         for idx, batch in enumerate(dataset):
             samples_in_batch = tf.shape(batch[-1] if isinstance(batch[-1], tf.Tensor) else batch[-1][0])[0]  #
             if data_is_list:
                 inputs = data[num_samples:num_samples + samples_in_batch]  # 注意，在这里做了数据拆分，拆成一个个batch，按batch_size拆分
+                # inputs的格式是一个二维数组，len(inputs)=128, len(inputs[i])为每个句子的长度
             else:
                 inputs = None  # if data is a generator, it's usually one-time, not able to transform into a list
 
+            input_batches += inputs
+            X.append(batch[0])
+
             char_num = sum([len(i) for i in inputs])
             t00 = time.time()
-            results += self.predict_batch(batch, inputs=inputs, **kwargs)
+            results.append(self.model.predict_on_batch(batch[0]))
             t11 = time.time()
             time_pure_cal = round(t11 - t00, 3)
-            print('time_pure_cal:', time_pure_cal, 'char processing:%s per second' % (round(char_num / time_pure_cal)), '\n')
-            # for output in gen:
-            #     results.append(output)
+            print('FOR GPU test——time_pure_cal:', time_pure_cal,
+                  'char processing:%s per second' % (round(char_num / time_pure_cal)))
             num_samples += samples_in_batch
-        tb = time.time()
-        time_calculating = round(tb - ta, 3)
-        print('time_calculating=%s' % (time_calculating))
 
-        outs = list(self.transform.Y_to_outputs(Y, X=X, inputs=inputs, **kwargs))
+        t111 = time.time()
+        outs = list(self.transform.Y_to_outputs(results, X=X, inputs=input_batches, **kwargs))
         t222 = time.time()
-        # print("后处理时间：", round(t222 - t111, 3))
-        for output in outs:
-            yield output
-
+        char_all = sum([len(b) for b in input_batches])
+        post_precessing_time = round(t222 - t111, 3)
+        print("FOR CPU test——post_precessing_time:%s，char processing:%s per second" % (
+        post_precessing_time, round(char_all / post_precessing_time, 3)))
+        print("for all, process %s chars per sec." % (round(char_all / (t222 - ta), 3)), '\n')
         if flat:
-            return results[0]
-        return results
+            return outs[0]
+        return outs
 
-    def predict_batch(self, batch, inputs=None, **kwargs):
-        # batch是从token转为number的数据，而inputs是原始数据。计算的时候使用`batch`这种已经转化为计算机可理解的数据进行运算，
-        # 然后再使用Y_to_outputs()函数做些处理，将tag标记到对应的原始数据input上
-        X = batch[0]
-        return self.model.predict_on_batch(X)
+    # def predict_batch(self, batch, inputs=None, **kwargs):
+    #     # batch是从token转为number的数据，而inputs是原始数据。计算的时候使用`batch`这种已经转化为计算机可理解的数据进行运算，
+    #     # 然后再使用Y_to_outputs()函数做些处理，将tag标记到对应的原始数据input上
+    #     X = batch[0]
+    #     return self.model.predict_on_batch(X)
 
     @property
     def sample_data(self):
